@@ -1,0 +1,85 @@
+/**
+ * Estilos usados pelo módulo mvp.
+ */
+
+.mvp-afirmacao p{
+    font-size: 1.25em;
+    font-weight: 300;
+}
+
+.mvp-cartao {
+  padding: 40px;
+  background-color: #f6f6f2;
+  color: #333;
+  margin: 0 auto 20px;
+  border-radius: 2px;
+  box-shadow: 0 2px 4px 0 rgba(0,0,0,0.16),0 2px 10px 0 rgba(0,0,0,0.12) !important;
+}
+
+.mvp-erro {
+  color: #721c24;
+  background-color: #f8d7da;
+  border-color: #f5c6cb;
+}
+
+.mvp-grafico {
+  display: block;
+  margin: auto;
+}
+
+.mvp-midia-social {
+	display: block;
+  margin: 10px auto;
+}
+
+.mvp-midia-social ul.menu-social {
+	list-style: none;
+	text-align: center;
+	margin: 0;
+	padding: 0;
+	display: -webkit-box;
+	display: -webkit-flex;
+	display: -ms-flexbox;
+	display: flex;
+	-webkit-flex-wrap: nowrap;
+	-ms-flex-wrap: nowrapwrap;
+	flex-wrap: nowrap;
+}
+
+.mvp-midia-social ul.menu-social li {
+	flex: 0 1 40px;
+	height: 40px;
+}
+
+/** 
+ * Esses itens são definidos na folha de estilo adicionada pela função 
+ * mvp_html_head_alter() no arquivo /mvp/mvp.module.
+ * Folha de estilo adicionada:
+ * @see https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css
+ */
+
+a.fa {
+  color : white;
+  text-decoration: none;
+}
+
+.fa {
+  padding: 10px;
+  font-size: 20px;
+  width: 20px;
+  text-align: center;
+  margin: 4px 2px;
+  border-radius: 50%;
+}
+
+.fa:hover {
+    opacity: 0.7;
+}
+
+.fa-facebook {
+  background: #3B5998;
+}
+
+.fa-twitter {
+  background: #55ACEE;
+}

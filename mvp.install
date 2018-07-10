@@ -1,0 +1,37 @@
+<?php
+/**
+* @file Funções executadas durante a instalação/desinstalação do módulo.
+*/
+
+/**
+ * Cria o diretório "mvp" dentro do diretório de arquivos públicos do Drupal.
+ *
+ * Implementa hook_install().
+ */
+function mvp_install() {
+  $real_file_path_mvp = file_default_scheme() . '://mvp';
+  if (!file_prepare_directory($real_file_path_mvp, FILE_CREATE_DIRECTORY)) {
+    drupal_set_message(st('Ocorreu um erro ao instalar o módulo "mvp". Não foi 
+possível criar o diretório @dir. Verifique suas permissões de leitura e escrita. 
+Esse diretório é necessário para armazenar o cache de gráficos com a posição 
+política do usuário.', 
+array('@dir' => drupal_realpath($real_file_path_mvp))), 'error');
+  }
+}
+
+/**
+ * Remove o diretório "mvp" dentro do diretório de arquivos públicos do Drupal.
+ *
+ * Implementa hook_uninstall().
+ */
+function mvp_uninstall() {
+  // Delete 'mvp' directory from files directory.
+  $real_file_path_mvp = drupal_realpath(file_default_scheme() . '://mvp');
+  if (!file_unmanaged_delete_recursive($real_file_path_mvp)) {
+    drupal_set_message(t('Ocorreu um erro ao desinstalar o módulo "mvp". Não foi 
+possível remover o diretório @dir ou seus arquivos. Verifique suas permissões de 
+leitura e escrita. Esse diretório é usado para armazenar o cache de gráficos com 
+a posição política do usuário.',
+array('@dir' => drupal_realpath($real_file_path_mvp))), 'error');
+  }
+}

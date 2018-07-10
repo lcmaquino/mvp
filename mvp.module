@@ -1,0 +1,505 @@
+<?php
+/**
+ * @file Determina a visão política de uma pessoa através de um formulário.
+ */
+
+/**
+ * Fornece um texto de ajuda sobre o módulo.
+ *
+ * Implementa o gancho hook_help().
+ *
+ * @param string $path 
+ *   A rota para o caminho definido.
+ *
+ * @param array $arg
+ *   Uma array que corresponde ao valor retornado pela função arg(), para 
+ * módulos que fornecem uma ajuda específica para certa rota.
+ *
+ * @return string
+ *   Texto de ajuda sobre o módulo.
+ *
+ * @see https://api.drupal.org/api/drupal/modules!system!system.api.php/function/hook_help/7
+ */
+function mvp_help($path, $arg) {
+  switch ($path) {
+    case 'admin/help#mvp':
+      $ajuda  = '<p>' . t('Gera o gráfico com o posicionamento político do 
+usuário com base em suas opiniões sobre um conjunto de afirmações.') . '</p>';
+      $ajuda .= '<p>' . t('Para o correto funcionamento deste módulo é necessário:
+<ul><li>a criação de um nó do tipo "afirmacao" 
+(<a href="@adicionar_no">Estrutura &raquo; 
+Tipos de conteúdo &raquo; Novo tipo de conteúdo</a>);</li>
+<li>adicionar no nó "afirmacao" os campos "field_liberdade" e "field_intervencao",
+ambos do tipo "Listagem (texto)";</li>
+<li>O campo "field_liberdade" deve ter como valores permitidos
+"le|Liberdade econômica" e "lp|Liberdade pessoal". Já o campo "field_intervencao" 
+deve ter "ni|Nenhuma intervenção" e "ti|Total intervenção".</li>
+</ul>',
+array('@adicionar_no' => url('admin/structure/types/add'))) . '</p>';
+      return $ajuda;
+  }
+}
+
+/**
+ * Define as rotas.
+ * 
+ * Implementa o gancho hook_menu().
+ *
+ * @return array
+ *   Array com as rotas defindas pelo módulo.
+ *
+ * @see https://api.drupal.org/api/drupal/modules!system!system.api.php/function/hook_menu/7
+ */
+function mvp_menu() {
+  //Somente administradores podem acessar essa opção.
+  $items['admin/config/content/mvp/settings'] = array(
+      'title' => 'Minha Visão Política',
+      'description' => 'Configurações do módulo MVP.',
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('mvp_admin_configuracoes'),
+      'access arguments' => array('administer site configuration'),
+      'type' => MENU_NORMAL_ITEM,
+      'file' => 'mvp.admin.inc',
+  );
+  $items['mvp'] = array(
+      'title' => 'Minha Visão Política',
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('mvp_form'),
+      'access callback' => TRUE,
+      'description' => 'Preencha o formulário para determinar sua visão política.',
+  );
+  $items['grafico'] = array(
+      'title' => 'Meu Gráfico',
+      'page callback' => 'mvp_grafico',
+      'access callback' => TRUE,
+      'description' => 'Gráfico de sua visão política.',
+  );
+  return $items;
+}
+
+/**
+ * Altera as tags na seção <head> do html gerado pelo Drupal.
+ *
+ * Implementa o gancho hook_html_head_alter().
+ *
+ * @param array &$head_elements
+ *   Uma array com os elementos a serem renderizados.
+ *
+ * @see https://api.drupal.org/api/drupal/modules%21system%21system.api.php/function/hook_html_head_alter/7.x
+ */
+function mvp_html_head_alter(&$head_elements) {
+  global $base_url;
+  $query = drupal_get_query_parameters();
+  $file_public_path = variable_get('file_public_path', conf_path() . '/files') . '/mvp';
+  $e = isset($query['e']) ? $query['e'] : '';
+  $p = isset($query['p']) ? $query['p'] : '';
+  if (drupal_get_path_alias() == 'grafico' && _mvp_validar_posicao($e, $p)) {
+    $head_elements['ogurl'] = array(
+      '#type' => 'markup',
+      '#markup' => '<meta property="og:url" content="' . $base_url . '/grafico?e=' . $e . '&p=' . $p . '">' . PHP_EOL,
+    );
+    $head_elements['ogtype'] = array(
+      '#type' => 'markup',
+      '#markup' => '<meta property="og:type" content="website">' . PHP_EOL,
+    );
+    $head_elements['ogtitle'] = array(
+      '#type' => 'markup',
+      '#markup' => '<meta property="og:title" content="' . drupal_get_title() . '">' . PHP_EOL,
+    );
+    $head_elements['ogdescription'] = array(
+      '#type' => 'markup',
+      '#markup' => '<meta property="og:description" content="Essa é Minha Visão Política. Qual é a sua?">' . PHP_EOL,
+    );
+    $head_elements['ogimage'] = array(
+      '#type' => 'markup',
+      '#markup' => '<meta property="og:image" content="' . $base_url . 
+"/$file_public_path/mvp_{$e}_{$p}.png" . '">' . PHP_EOL,
+    );
+    $head_elements['oglocale'] = array(
+      '#type' => 'markup',
+      '#markup' => '<meta property="og:locale" content="pt_BR">' . PHP_EOL,
+    );
+    $head_elements['font-awesome'] = array(
+      '#type' => 'markup',
+      '#markup' => '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">' . PHP_EOL,
+    );    
+  } 
+}
+
+/**
+ * Gera a página de visualização do gráfico político.
+ *
+ * @return array
+ *   Uma array com os elementos a serem renderizados.
+ */
+function mvp_grafico() {
+  global $base_url;
+  $query = drupal_get_query_parameters();
+  $e = isset($query['e']) ? $query['e'] : '';
+  $p = isset($query['p']) ? $query['p'] : '';
+  $mvp_path = drupal_get_path('module', 'mvp');
+  if (_mvp_validar_posicao($e, $p)) {
+    //Se a pessoa digitar os valores "e" e "p" diretamente na query eles serão aproximados.
+    $e = round($e, 2);
+    $p = round($p, 2);
+    $file_public_path = variable_get('file_public_path', conf_path() . '/files') . '/mvp';
+    $real_file_public_path = drupal_realpath($file_public_path);
+    if (file_destination("$file_public_path/mvp_{$e}_{$p}.png", FILE_EXISTS_ERROR)) {
+      $base = imagecreatefrompng("$mvp_path/img/quadrante-politico-base.png");
+      $texto = imagecreatefrompng("$mvp_path/img/quadrante-politico-texto.png");
+      $ponto = imagecreatefrompng("$mvp_path/img/ponto.png");
+      _mvp_imagecopymerge_alpha($base, $ponto, 351 + round($e*258), 351 - round($p*258), 0, 0, 18, 18, 100);
+      _mvp_imagecopymerge_alpha($base, $texto, 0, 0, 0, 0, 720, 720, 100);
+      imagepng($base, "$real_file_public_path/mvp_{$e}_{$p}.png");
+      imagedestroy($base);
+      imagedestroy($texto);
+      imagedestroy($ponto);      
+    }
+    $img_url = $base_url . "/grafico?e=$e&p=$p";
+    $img_file =  $base_url . "/$file_public_path/mvp_{$e}_{$p}.png";
+    //Código do link de compartilhar no Facebook;
+    $facebook_link = '<a  class="fa fa-facebook" href="http://www.facebook.com/sharer/sharer.php?u=' . urlencode($img_url) . '" target="_blank"></a>';
+    //Código do link de compartilhar no Twitter;
+    $twitter_link = '<a class="fa fa-twitter" href="http://twitter.com/intent/tweet?text=' . urlencode('Essa é Minha Visão Política. Qual é a sua?') . '&url=' . urlencode($img_url) . '&hashtags=mvp" target="_blank"></a>';
+    $items['midia-social'] = array(
+      '#markup' => '<ul class="menu-social"><li>' . $twitter_link . '</li><li>' . $facebook_link . '</li></ul>',
+      '#prefix' => '<div class="mvp-midia-social">',
+      '#suffix' => '</div>',
+    );
+    //Descrição da região do gráfico.
+    $descricao = '<p>' . _mvp_obter_descricao($e, $p) . '</p>' . PHP_EOL;
+    //Tag com a imagem do gráfico.
+    $img_tag = "<img alt='Meu gráfico' class='mvp-grafico' src='$img_file'>" . PHP_EOL;
+  }
+  else {
+    drupal_set_message(t('Ops! Não foi possível carregar o gráfico. :('), 'error');
+    $descricao = '';
+    $img_tag = "<img alt='Meu gráfico' class='mvp-grafico' src='$mvp_path/img/quadrante-politico-indefinido.png'>";
+  }
+  $items['cartao'] = array(
+    '#prefix' => '<div class="mvp-cartao">',
+    '#suffix' => '</div>',
+  );
+  $items['cartao']['descricao'] = array(
+    '#markup' => $descricao,
+    '#prefix' => '<div class="mvp-descricao">',
+    '#suffix' => '</div>',
+  );
+  $items['cartao']['mvp-grafico'] = array(
+    '#markup' => $img_tag,
+    '#prefix' => '<div class="mvp-imagem">',
+    '#suffix' => '</div>',
+  );
+  return $items;
+}
+
+/**
+ * Gera o formulário com as afirmações do teste para determinar a posição no gráfico.
+ * 
+ * @param array $form
+ *   Uma array com os elementos do formulário.
+ *
+ * @param array &$form_state
+ *   Uma array com os elementos do formulário após submissão.
+ *
+ * @return array
+ *   Uma array com os elementos do formulário a serem renderizados.
+ */
+function mvp_form($form, &$form_state) {
+  $form['#tree'] = TRUE;
+  $aviso = '<p>' . t('Marque sua opinião em todas as afirmações para determinar 
+sua posição na região do espectro político.') . '</p>';
+  $form['aviso'] = array(
+    '#type' => 'item',
+    '#markup' => $aviso,
+  );
+  $nos = node_load_multiple(array(), array('type' => 'afirmacao', 'status' => 1));
+  $nids = array_keys($nos);
+  foreach ($nids as $nid) {
+    $liberdade = $nos[$nid]->field_liberdade[LANGUAGE_NONE][0]['value'];
+    $intervencao = $nos[$nid]->field_intervencao[LANGUAGE_NONE][0]['value'];
+    $aux_sort[$liberdade][$intervencao][] = $nid;
+  }
+  $sort = $aux_sort['le']['ni'];
+  $sort = array_merge($sort, $aux_sort['le']['ti']);
+  $sort = array_merge($sort, $aux_sort['lp']['ni']);
+  $sort = array_merge($sort, $aux_sort['lp']['ti']);
+  $i = 1;
+  foreach ($sort as $nid) {
+    $liberdade = $nos[$nid]->field_liberdade[LANGUAGE_NONE][0]['value'];
+    $intervencao = $nos[$nid]->field_intervencao[LANGUAGE_NONE][0]['value'];
+    $body = $nos[$nid]->body[LANGUAGE_NONE][0]['safe_value'];
+    $form['afirmacao']['opcao'][$nid] = array(
+      '#type' => 'radios',
+      '#title' => '<div class="mvp-afirmacao"><span class="mvp-afirmacao-numeracao">' . 
+check_plain($i) . '.</span>' . filter_xss($body) . '</div>',
+      '#options' => array(5 => 'Concordo totalmente.', 4 => 'Concordo parcialmente.', 
+                          3 => 'Não concordo e nem descordo.', 2 => 'Discordo parcialmente.', 
+                          1 => 'Discordo totalmente.'),
+    );
+    $class = 'mvp-cartao';
+    if (isset($form_state['storage']['afirmacao']['opcao']) && 
+        empty($form_state['storage']['afirmacao']['opcao'][$nid])) {
+      $class .= ' mvp-erro';
+    }
+    $form['afirmacao']['opcao'][$nid]['#prefix'] = '<div class="' . $class . '">';
+    $form['afirmacao']['opcao'][$nid]['#suffix'] = '</div>';
+
+    $form['afirmacao']['liberdade'][$nid] = array(
+      '#type' => 'value', 
+      '#value' => $liberdade,
+    );
+    $form['afirmacao']['intervencao'][$nid] = array(
+      '#type' => 'value', 
+      '#value' => $intervencao,
+    );
+    $i++;
+  }
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Enviar'),
+  );
+  return $form;
+}
+
+/**
+ * Controla a submissão do formulário de teste.
+ *
+ * @param array $form
+ *   Uma array com os elementos do formulário.
+ *
+ * @param array &$form_state
+ *   Uma array com os elementos do formulário após submissão.
+ *
+ * @see mvp_form()
+ */
+function mvp_form_submit($form, &$form_state) {
+  if (_mvp_validar_afirmacoes($form_state['values']['afirmacao']['opcao'])) {
+    $res = _mvp_calcular_posicao($form_state['values']['afirmacao']);
+    $form_state['redirect'] = array(
+      'grafico',
+      array(
+        'query' => array(
+          'e' => $res['e'],
+          'p' => $res['p'],
+        ),
+      ),
+    );
+  }
+  else {
+    drupal_set_message(t('Você precisa marcar sua opinião em cada afirmação.'), 'error');
+    $form_state['storage']['afirmacao']['opcao'] = $form_state['values']['afirmacao']['opcao'];
+    $form_state['rebuild'] = TRUE;
+  }
+}
+
+/** Funções Auxiliares **/
+
+/**
+ * Verifica se o usuário marcou uma opção em cada afirmação. 
+ *
+ * @param array $afirmacoes
+ *   Contém as opções marcadas pelo usuário sobre as afirmações.
+ *
+ * @return boolean
+ *   Retorna verdadeiro se o usuário marcou uma opção em cada afirmação. 
+ *   Falso, caso contrário.
+ */
+function _mvp_validar_afirmacoes($afirmacoes = array()) {
+  return count(array_filter($afirmacoes)) == count($afirmacoes);
+}
+
+/**
+ * Verifica se a posição informada é válida.
+ *
+ * @param float $e
+ *   Valor para a coordenada da liberdade econômica.
+ *
+ * @param float $p
+ *   Valor para a coordenada da liberdade pessoal.
+ *
+ * @return boolean
+ *   Retorna verdadeiro se $e e $p são valores numéricos e estão no intervalo [-1; 1].
+ *   Falso, caso contrário.
+ */
+function _mvp_validar_posicao($e, $p) {
+    return is_numeric($e) && is_numeric($p) && $e >= -1.0 && $e <= 1.0 && $p >= -1.0 && $p <= 1.0;
+}
+
+/**
+ * Mescla duas imagens.
+ *
+ * @param resource $dst_im
+ *   Imagem de destino.
+ *
+ * @param resource $src_im
+ *   Imagem de origem.
+ *
+ * @param int $dst_x
+ *   Coordenada x na imagem de destino.
+ *
+ * @param int $dst_y
+ *   Coordenada y na imagem de destino.
+ *
+ * @param int $src_x
+ *   Coordenada x na imagem de origem.
+ *
+ * @param int $src_y
+ *   Coordenada y na imagem de origem.
+ *
+ * @param int $src_w
+ *   Largura da imagem de origem.
+ *
+ * @param int $src_h
+ *   Altura da imagem de origem.
+ *
+ * @param int $pct
+ *   Nível de transparência na mesclagem. Valor no intervalo [0; 100].
+ *
+ * PNG ALPHA CHANNEL SUPPORT for imagecopymerge();
+ * by Sina Salek
+ *
+ * Bugfix by Ralph Voigt (bug which causes it
+ * to work only for $src_x = $src_y = 0.
+ * Also, inverting opacity is not necessary.)
+ * 08-JAN-2011
+ * @see: http://php.net/manual/en/function.imagecopymerge.php
+ */
+function _mvp_imagecopymerge_alpha($dst_im, $src_im, $dst_x, $dst_y, $src_x, $src_y, $src_w, $src_h, $pct) {
+  // creating a cut resource 
+  $cut = imagecreatetruecolor($src_w, $src_h); 
+  // copying relevant section from background to the cut resource 
+  imagecopy($cut, $dst_im, 0, 0, $dst_x, $dst_y, $src_w, $src_h); 
+  // copying relevant section from watermark to the cut resource 
+  imagecopy($cut, $src_im, 0, 0, $src_x, $src_y, $src_w, $src_h); 
+  // insert cut resource to destination image 
+  imagecopymerge($dst_im, $cut, $dst_x, $dst_y, 0, 0, $src_w, $src_h, $pct);
+}
+
+/**
+ * Calcula a posição do usuário no gráfico.
+ *
+ * @param array $afirmacoes
+ *   Contém as opções marcadas pelo usuário sobre as afirmações.
+ *
+ * @return array
+ *   Retorna uma array com as chaves 'e' e 'p' contendo, respecitvamente, os 
+ * valores determinados para a liberdade econômica e liberdade pessoal.
+ */
+function _mvp_calcular_posicao($afirmacoes = array()) {
+  //Soma dos pontos dados nas afirmações sobre nenhuma intervenção do Estado na economia.
+  $snile = 0;
+  //Soma dos pontos dados nas afirmações sobre total intervenção do Estado na economia.
+  $stile = 0;
+  //Soma dos pontos dados nas afirmações sobre nenhuma intervenção do Estado no indivíduo.
+  $snilp = 0;
+  //Soma dos pontos dados nas afirmações sobre total intervenção do Estado no indivíduo.
+  $stilp = 0;
+
+  //Quantidade de afirmações sobre nehuma intervenção do Estado na liberdade econômica.
+  $qtd_nile = 0;
+  //Quantidade de afirmações sobre total intervenção do Estado na liberdade econômica.
+  $qtd_tile = 0;
+  //Quantidade de afirmações sobre nenhuma intervenção do Estado na liberdade pessoal.
+  $qtd_nilp = 0;
+  //Quantidade de afirmações sobre total intervenção do Estado na liberdade pessoal.
+  $qtd_tilp = 0;
+
+  foreach ($afirmacoes['opcao'] as $nid => $valor) {
+    switch ($afirmacoes['liberdade'][$nid]) {
+      case 'le':
+        switch ($afirmacoes['intervencao'][$nid]) {
+          case 'ni':
+            $snile += $valor;
+            $qtd_nile++;
+            break;
+          case 'ti':
+            $stile += $valor;
+            $qtd_tile++;
+            break;
+        }
+        break;
+      case 'lp':
+        switch ($afirmacoes['intervencao'][$nid]) {
+          case 'ni':
+            $snilp += $valor;
+            $qtd_nilp++;
+            break;
+          case 'ti':
+            $stilp += $valor;
+            $qtd_tilp++;
+            break;
+        }
+        break;
+    }
+  }
+  /*
+   * Tanto $e quanto $p seguem o seguinte princípio de cálculo:
+   * Nenhuma intervenção => $ni = (soma_valores_ni - menor_soma_possivel_ni)/(maior_soma_possivel_ni - menor_soma_possivel_ni)
+   * Total intervenção => $ti = (soma_valores_ti - menor_soma_possivel_ti)/(maior_soma_possivel_ti - menor_soma_possivel_ti)
+   * $e = $ni - $ti  ou  $p = $ni - $ti
+   * Note que para "ni" (nenhuma intervenção):
+   * menor_soma_possivel_ni = (qtd de afirmações ni)*1, pois 1 é o menor peso atribuído a uma afirmação.
+   * maior_soma_possivel_ni = (qtd de afirmações ni)*5, pois 5 é o maior peso atribuído a uma afirmação.
+   * maior_soma_possivel_ni - menor_soma_possivel_ni = (qtd de afirmações ni)*4
+   * O mesmo raciocício vale para "ti" (total intervenção):
+   * maior_soma_possivel_ti - menor_soma_possivel_ti = (qtd de afirmações ti)*4
+  */
+  $e = ($qtd_nile != 0 && $qtd_tile != 0) ? (($snile - $qtd_nile)/(4.0*$qtd_nile)) - (($stile - $qtd_tile)/(4.0*$qtd_tile)) : 0;
+  $p = ($qtd_nilp != 0 && $qtd_tilp != 0) ? (($snilp - $qtd_nilp)/(4.0*$qtd_nilp)) - (($stilp - $qtd_tilp)/(4.0*$qtd_tilp)) : 0;
+  return array('e' => round($e, 2), 'p' => round($p, 2));
+}
+
+/**
+ * Determina a descrição da posição.
+ *
+ * @param float $e
+ *   Valor para a coordenada da liberdade econômica.
+ *
+ * @param float $p
+ *   Valor para a coordenada da liberdade pessoal.
+ *
+ * @return string
+ *   Texto da descrição da posição.
+ */
+function _mvp_obter_descricao($e, $p) {
+  if ($e > 0 && $p >= 0) {
+    $espectro = 'libertário';
+    $liberdade = 'Você defende menos intervenção do Estado tanto na economia 
+quanto na vida pessoal dos indivíduos.';
+  }
+  elseif ($e <= 0 && $p > 0) {
+    $espectro = 'socialista';
+    $liberdade = 'Você defende uma maior intervenção do Estado na economia, 
+mas menos intervenção na vida pessoal dos indivíduos.';
+  }
+  elseif ($e < 0 && $p <= 0) {
+    $espectro = 'autoritário';
+    $liberdade = 'Você defende uma maior intervenção do Estado tanto na 
+economia quanto na vida pessoal dos indivíduos.';
+  }
+  elseif ($e >= 0 && $p < 0) {
+    $espectro = 'conservador';
+    $liberdade = 'Você defende menos intervenção do Estado na economia, mas 
+uma maior intervenção na vida pessoal dos indivíduos.';
+  }
+  if ($e*$e + $p*$p < 0.4*0.4) {
+    $espectro = 'centro';
+    $liberdade = 'Você defende uma intervenção moderada do Estado tanto na 
+economia quanto na vida pessoal dos indivíduos.';
+  }
+  $descricao = 'Você está na região "' . $espectro . '". ' . $liberdade;
+  if ($espectro == 'libertário' || $espectro == 'autoritário') {
+    if ($e > $p) {
+      $descricao .= ' Além disso, você dá mais valor à liberdade econômica 
+do que à liberdade pessoal, de tal modo que você está mais próximo 
+da "direita" do que da "esquerda" no aspecto econômico.'; 
+    }
+    elseif ($e < $p) {
+      $descricao .= ' Além disso, você dá mais valor à liberdade pessoal 
+do que à liberdade econômica, de tal modo que você está mais próximo 
+da "esquerda" do que da "direita" no aspecto econômico.';
+    }
+  }
+  return $descricao;
+}

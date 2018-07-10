@@ -1,0 +1,8 @@
+name = Minha Visão Política
+description = Determina a posição política de uma pessoa através de um formulário.
+package = MVP
+core = "7.x"
+version = "7.x-1.0"
+configure = admin/config/content/mvp/settings
+stylesheets[all][] = css/mvp.css
+files[] = mvp.module
