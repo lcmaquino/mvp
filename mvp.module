@@ -232,7 +232,7 @@ sua posição na região do espectro político.') . '</p>';
     $form['afirmacao']['opcao'][$nid] = array(
       '#type' => 'radios',
       '#title' => '<div class="mvp-afirmacao"><span class="mvp-afirmacao-numeracao">' . 
-check_plain($i) . '.</span>' . filter_xss($body) . '</div>',
+check_plain($i) . '.</span> ' . filter_xss($body) . '</div>',
       '#options' => array(5 => 'Concordo totalmente.', 4 => 'Concordo parcialmente.', 
                           3 => 'Não concordo e nem descordo.', 2 => 'Discordo parcialmente.', 
                           1 => 'Discordo totalmente.'),
